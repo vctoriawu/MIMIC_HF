@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 
 def read_data():
-    df = pd.read_csv('mimic_HF.csv')
+    df = pd.read_csv('labml_nn/gat/mimic_hf.csv')
     return df
 
 def drop_duplicates(df):

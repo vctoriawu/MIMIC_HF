@@ -1,0 +1,15 @@
+comment: ''
+commit: unknown
+commit_message: ''
+is_dirty: false
+load_run: null
+name: gat
+notes: ''
+python_file: /Users/andreafung/Desktop/Advanced_ML_Tools/CourseProject/GNN_implementation/MIMIC_HF/labml_nn/gat/experiment.py
+repo_remotes: []
+start_step: 0
+tags:
+- gat
+trial_date: '2023-03-21'
+trial_time: '16:57:52'
+uuid: 30f18778c84411ed995ce6919609a74b

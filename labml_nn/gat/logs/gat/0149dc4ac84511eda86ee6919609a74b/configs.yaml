@@ -1,0 +1,164 @@
+adj_mat:
+  computed: null
+  is_explicitly_specified: false
+  is_hyperparam: null
+  is_meta: null
+  name: adj_mat
+  options:
+  - get_adj_mat
+  order: -1
+  type: <class 'torch.Tensor'>
+  value: null
+batch_size:
+  computed: null
+  is_explicitly_specified: false
+  is_hyperparam: null
+  is_meta: null
+  name: batch_size
+  options: []
+  order: -1
+  type: '32'
+  value: null
+dataset:
+  computed: null
+  is_explicitly_specified: false
+  is_hyperparam: null
+  is_meta: null
+  name: dataset
+  options:
+  - get_dataset
+  order: -1
+  type: <class 'labml_nn.gat.dataloader.MIMICDataset'>
+  value: null
+device:
+  computed: null
+  is_explicitly_specified: false
+  is_hyperparam: null
+  is_meta: null
+  name: device
+  options: []
+  order: -1
+  type: <class 'torch.device'>
+  value: null
+dropout:
+  computed: null
+  is_explicitly_specified: false
+  is_hyperparam: null
+  is_meta: null
+  name: dropout
+  options: []
+  order: -1
+  type: <class 'float'>
+  value: null
+epochs:
+  computed: null
+  is_explicitly_specified: false
+  is_hyperparam: null
+  is_meta: null
+  name: epochs
+  options: []
+  order: -1
+  type: <class 'int'>
+  value: null
+in_features:
+  computed: null
+  is_explicitly_specified: false
+  is_hyperparam: null
+  is_meta: null
+  name: in_features
+  options: []
+  order: -1
+  type: <class 'int'>
+  value: null
+include_edges:
+  computed: null
+  is_explicitly_specified: false
+  is_hyperparam: null
+  is_meta: null
+  name: include_edges
+  options: []
+  order: -1
+  type: <class 'bool'>
+  value: null
+loss_func:
+  computed: null
+  is_explicitly_specified: false
+  is_hyperparam: null
+  is_meta: null
+  name: loss_func
+  options: []
+  order: -1
+  type: <class 'torch.nn.modules.loss.BCELoss'>
+  value: null
+model:
+  computed: null
+  is_explicitly_specified: false
+  is_hyperparam: null
+  is_meta: null
+  name: model
+  options:
+  - gat_model
+  order: -1
+  type: <class '__main__.GAT'>
+  value: null
+n_classes:
+  computed: null
+  is_explicitly_specified: false
+  is_hyperparam: null
+  is_meta: null
+  name: n_classes
+  options: []
+  order: -1
+  type: <class 'int'>
+  value: null
+n_heads:
+  computed: null
+  is_explicitly_specified: false
+  is_hyperparam: null
+  is_meta: null
+  name: n_heads
+  options: []
+  order: -1
+  type: <class 'int'>
+  value: null
+n_hidden:
+  computed: null
+  is_explicitly_specified: false
+  is_hyperparam: null
+  is_meta: null
+  name: n_hidden
+  options: []
+  order: -1
+  type: <class 'int'>
+  value: null
+optimizer:
+  computed: null
+  is_explicitly_specified: false
+  is_hyperparam: null
+  is_meta: null
+  name: optimizer
+  options:
+  - _optimizer
+  order: -1
+  type: <class 'torch.optim.adam.Adam'>
+  value: null
+test_size:
+  computed: null
+  is_explicitly_specified: false
+  is_hyperparam: null
+  is_meta: null
+  name: test_size
+  options: []
+  order: -1
+  type: '0.1'
+  value: null
+val_size:
+  computed: null
+  is_explicitly_specified: false
+  is_hyperparam: null
+  is_meta: null
+  name: val_size
+  options: []
+  order: -1
+  type: '0.1'
+  value: null
