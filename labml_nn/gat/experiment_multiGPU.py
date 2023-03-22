@@ -11,7 +11,13 @@ from labml_helpers.device import DeviceConfigs
 from labml_helpers.module import Module
 from labml_nn.gat import GraphAttentionLayer
 from labml_nn.optimizers.configs import OptimizerConfigs
-from labml_nn.gat.dataloader import *
+from labml_nn.gat.dataloader_multigpu import *
+
+import torch.multiprocessing as mp
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.utils.data.distributed import DistributedSampler
+from torch.distributed import init_process_group, destroy_process_group
+import os
 
 class GAT(Module):
     """
@@ -113,12 +119,14 @@ class Configs(BaseConfigs):
     #
     # This creates configs for device, so that
     # we can change the device by passing a config value
-    device: torch.device = DeviceConfigs()
+    #device: torch.device = rank
+    backend: str = "nccl"
+
     # Optimizer
     optimizer: torch.optim.Adam
     adj_mat: torch.Tensor
 
-    def run(self):
+    def run(self, world_size: int, gpu_id: int):
         """
         ### Training loop
         We do full batch training since the dataset is small.
@@ -127,21 +135,20 @@ class Configs(BaseConfigs):
         across those selected nodes.
         """
         # Move the adjacency matrix to the device
-        edges_adj = self.adj_mat.to(self.device)
+        edges_adj = self.adj_mat.to(gpu_id)
         # Add an empty third dimension for the heads
         edges_adj = edges_adj.unsqueeze(-1)
+        #wrap model in ddp
+        self.model = DDP(self.model, device_ids=[gpu_id])
 
         # Training loop 
-        e_train_losses = []
-        e_train_acc = []
-        e_val_losses = []
-        e_val_acc = []
-
         for epoch in monit.loop(self.epochs):
             for batch_ndx, batch in enumerate(self.dataset[0]):
+                #set up ddp
+                ddp_setup(rank, world_size)
                 for i,row in enumerate(batch['patient']):
-                    train_features = batch['patient'][0].to(self.device)
-                    train_labels = batch['label'][i].to(self.device)
+                    train_features = batch['patient'][0].to(gpu_id)
+                    train_labels = batch['label'][i].to(gpu_id)
                     print(f"training epoch: {epoch}, batch: {batch_ndx}, patient: {i+1}")
                     print(f"model parameters: {count_parameters(self.model)}")
                     # Set the model to training moxde
@@ -153,25 +160,25 @@ class Configs(BaseConfigs):
                     print(output)
                     # Get the loss for training nodes
                     loss = self.loss_func(output, train_labels)
-                    e_train_losses.append(loss)
                     # Calculate gradients
                 loss.backward()
                 # Take optimization step
                 self.optimizer.step()
+                destroy_process_group()
                 # Log the loss
-                tracker.add('loss.train', loss)
-                train_accuracy = accuracy(output, train_labels)
-                e_train_acc.append(train_accuracy)
-                # Log the accuracy
-                tracker.add('accuracy.train', train_accuracy) 
+                if self.gpu_id == 0:
+                    tracker.add('loss.train', loss)
+                    train_accuracy = accuracy(output, train_labels)
+                    # Log the accuracy
+                    tracker.add('accuracy.train', train_accuracy) 
 
             # Set mode to evaluation mode for validation
             self.model.eval()
 
             for batch_ndx, batch in enumerate(self.dataset[1]):
                 for i,row in enumerate(batch['patient']):
-                    val_features = batch['patient'][0].to(self.device)
-                    val_labels = batch['label'][i].to(self.device)
+                    val_features = batch['patient'][0].to(gpu_id)
+                    val_labels = batch['label'][i].to(gpu_id)
                 # No need to compute gradients
                 with torch.no_grad():
                     # Evaluate the model again
@@ -190,6 +197,16 @@ class Configs(BaseConfigs):
             # Save logs
             tracker.save()
 
+def ddp_setup(rank, world_size, c:Configs):
+    """
+    Args:
+        rank: Unique identifier of each process
+        world_size: Total number of processes
+    """
+    os.environ["MASTER_ADDR"] = machine
+    os.environ["MASTER_PORT"] = freeport 
+    init_process_group(backend=c.backend, rank=rank, world_size=world_size)
+
 @option(Configs.dataset)
 def get_dataset(c: Configs):
     """
@@ -202,7 +219,7 @@ def gat_model(c: Configs):
     """
     Create GAT model
     """
-    return GAT(c.in_features, c.n_hidden, c.n_classes, c.n_heads, c.dropout).to(c.device)
+    return GAT(c.in_features, c.n_hidden, c.n_classes, c.n_heads, c.dropout)
 
 @option(Configs.adj_mat)
 def get_adj_mat(c: Configs):
@@ -226,8 +243,10 @@ def _optimizer(c: Configs):
     return opt_conf
 
 
-def main():
+def main(rank: int, world_size: int, freeport: str):
     # Create configurations
+    rank = rank
+    freeport = freeport
     conf = Configs()
     # Create an experiment
     experiment.create(name='gat')
@@ -243,9 +262,14 @@ def main():
     # Start and watch the experiment
     with experiment.start():
         # Run the training
-        conf.run()
+        conf.run(world_size = world_size, gpu_id = rank)
 
 
 #
 if __name__ == '__main__':
-    main()
+    import sys
+    world_size = torch.cuda.device_count()
+    gpu_ids = [0,1]
+    machine: str = "purang28"
+    freeport: str = "61247"
+    mp.spawn(main, args=(world_size, freeport), nprocs=world_size)
