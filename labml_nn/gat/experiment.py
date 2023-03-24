@@ -3,6 +3,7 @@ from typing import Dict
 import numpy as np
 import torch
 from torch import nn
+from tqdm import tqdm
 
 from labml import lab, monit, tracker, experiment
 from labml.configs import BaseConfigs, option, calculate
@@ -55,22 +56,30 @@ class GAT(Module):
         * `adj_mat` is the adjacency matrix of the form
          `[n_nodes, n_nodes, n_heads]` or `[n_nodes, n_nodes, 1]`
         """
-        # Apply dropout to the input
-        x = self.dropout(x)
-        # First graph attention layer
-        x = self.layer1(x, adj_mat)
-        # Activation function
-        x = self.activation(x)
-        # Dropout
-        x = self.dropout(x)
-        # Output layer (without activation) for logits
-        x = self.output(x, adj_mat)
-        # (46, 46)
-        x = torch.mean(x, axis=1)
-        x = x[None, :]
-        x = self.classification_mlp(x)
-        x = torch.squeeze(x, 0)
-        return x
+
+        outputs = []
+        for ex in x:
+            # Apply dropout to the input
+            x_int = self.dropout(ex)
+
+            # First graph attention layer
+            x_int = self.layer1(x_int, adj_mat)
+            # Activation function
+            x_int = self.activation(x_int)
+            # Dropout
+            x_int = self.dropout(x_int)
+            # Output layer (without activation) for logits
+            x_int = self.output(x_int, adj_mat)
+            # (46, 46)
+            x_int = torch.mean(x_int, axis=1)
+            x_int = x_int[None, :]
+            x_int = self.classification_mlp(x_int)
+            x_int = torch.squeeze(x_int, 0)
+            outputs.append(x_int)
+
+        out = torch.Tensor(outputs).unsqueeze(1)
+        out.requires_grad = True
+        return out
 
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -79,7 +88,19 @@ def accuracy(output: torch.Tensor, labels: torch.Tensor):
     """
     A simple function to calculate the accuracy
     """
-    return output.argmax(dim=-1).eq(labels).sum().item() / len(labels)
+    # Apply threshold of 0.5 to the predictions to convert them to binary values
+    preds = (output >= 0.5).float()
+    
+    # Compute the number of matching elements between the predictions and the true labels
+    num_correct = (preds == labels).sum().item()
+
+    # Compute the total number of examples
+    num_total = labels.size(0)
+
+    # Compute the accuracy as the fraction of matching examples
+    acc = num_correct / num_total
+
+    return  acc# output.argmax(dim=-1).eq(labels).sum().item() / len(labels)
 
 class Configs(BaseConfigs):
     """
@@ -97,7 +118,7 @@ class Configs(BaseConfigs):
     # Number of classes for classification
     n_classes: int = 2
     # Dropout probability
-    dropout: float = 0.6
+    dropout: float = 0.2
     # Whether to include the citation network
     include_edges: bool = True
     # Dataset
@@ -130,6 +151,10 @@ class Configs(BaseConfigs):
         edges_adj = self.adj_mat.to(self.device)
         # Add an empty third dimension for the heads
         edges_adj = edges_adj.unsqueeze(-1)
+        # unsqueeze the tensor along the first dimension to add a new batch dimension
+        #edges_adj = edges_adj.unsqueeze(0)
+        # repeat the tensor along the new batch dimension to create a tensor of shape [batch_size, 46, 46, 1]
+        #edges_adj = edges_adj.repeat(self.batch_size, 1, 1, 1)
 
         # Training loop 
         e_train_losses = []
@@ -138,40 +163,47 @@ class Configs(BaseConfigs):
         e_val_acc = []
 
         for epoch in monit.loop(self.epochs):
-            for batch_ndx, batch in enumerate(self.dataset[0]):
-                for i,row in enumerate(batch['patient']):
-                    train_features = batch['patient'][0].to(self.device)
-                    train_labels = batch['label'][i].to(self.device)
-                    print(f"training epoch: {epoch}, batch: {batch_ndx}, patient: {i+1}")
-                    print(f"model parameters: {count_parameters(self.model)}")
-                    # Set the model to training moxde
-                    self.model.train()
-                    # Make all the gradients zero
-                    self.optimizer.zero_grad()
-                    # Evaluate the model
-                    output = self.model(train_features, edges_adj)
-                    print(output)
-                    # Get the loss for training nodes
-                    loss = self.loss_func(output, train_labels)
-                    e_train_losses.append(loss)
-                    # Calculate gradients
+            for batch_ndx, batch in enumerate(tqdm(self.dataset[0], desc=f"Training Epoch {epoch}")):
+                #for i,row in enumerate(batch['patient']):
+                train_features = batch['patient'].to(self.device)
+                train_labels = batch['label'].to(self.device)
+
+                #print(f"training epoch: {epoch}, batch: {batch_ndx}, patient: {i+1}")
+                #print(f"model parameters: {count_parameters(self.model)}")
+                # Set the model to training moxde
+                self.model.train()
+                # Make all the gradients zero
+                self.optimizer.zero_grad()
+                # Evaluate the model
+                output = self.model(train_features, edges_adj)
+
+                # Get the loss for training nodes
+                loss = self.loss_func(output, train_labels)
+
+                #e_train_losses.append(loss)
+                # Calculate gradients
                 loss.backward()
+                e_train_losses.append(loss)
                 # Take optimization step
                 self.optimizer.step()
+                # Log progress
+                #print(f"training epoch: {epoch}, batch: {batch_ndx}") 
                 # Log the loss
-                tracker.add('loss.train', loss)
+                # tracker.add('loss.train', loss)
                 train_accuracy = accuracy(output, train_labels)
                 e_train_acc.append(train_accuracy)
                 # Log the accuracy
-                tracker.add('accuracy.train', train_accuracy) 
+                # tracker.add('accuracy.train', train_accuracy) 
+
+            print(f"Training epoch: {epoch}, Accuracy {sum(e_train_acc) / len(e_train_acc)}, Loss {sum(e_train_losses) / len(e_train_losses)}") 
 
             # Set mode to evaluation mode for validation
             self.model.eval()
 
             for batch_ndx, batch in enumerate(self.dataset[1]):
-                for i,row in enumerate(batch['patient']):
-                    val_features = batch['patient'][0].to(self.device)
-                    val_labels = batch['label'][i].to(self.device)
+                #for i,row in enumerate(batch['patient']):
+                val_features = batch['patient'].to(self.device)
+                val_labels = batch['label'].to(self.device)
                 # No need to compute gradients
                 with torch.no_grad():
                     # Evaluate the model again
@@ -180,12 +212,13 @@ class Configs(BaseConfigs):
                     loss = self.loss_func(output, val_labels) 
                     e_val_losses.append(loss)
                     # Log the loss
-                    tracker.add('loss.valid', loss)
+                    # tracker.add('loss.valid', loss)
                     val_accuracy = accuracy(output, val_labels)
                     e_val_acc.append(val_accuracy)
+
                     # Log the accuracy
-                    tracker.add('accuracy.valid', val_accuracy)
-                    print(f"validation epoch: {epoch}, batch: {batch_ndx}, patient: {i+1}") 
+                    # tracker.add('accuracy.valid', val_accuracy)
+            print(f"validation epoch: {epoch}, Accuracy {sum(e_val_acc) / len(e_val_acc)}, Loss {sum(e_val_losses) / len(e_val_losses)}") 
 
             # Save logs
             tracker.save()
@@ -202,7 +235,9 @@ def gat_model(c: Configs):
     """
     Create GAT model
     """
-    return GAT(c.in_features, c.n_hidden, c.n_classes, c.n_heads, c.dropout).to(c.device)
+    model = GAT(c.in_features, c.n_hidden, c.n_classes, c.n_heads, c.dropout).to(c.device)
+    print(model)
+    return model
 
 @option(Configs.adj_mat)
 def get_adj_mat(c: Configs):
@@ -235,7 +270,7 @@ def main():
     experiment.configs(conf, {
         # Adam optimizer
         'optimizer.optimizer': 'Adam',
-        'optimizer.learning_rate': 5e-3,
+        'optimizer.learning_rate': 1e-4,
         'optimizer.weight_decay': 5e-4,
         }
     )
