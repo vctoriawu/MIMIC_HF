@@ -1,8 +1,11 @@
 import pandas as pd
 import numpy as np
+import sys
+
+sys.path.append('./data')
 
 def read_data():
-    df = pd.read_csv('mimic_HF.csv')
+    df = pd.read_csv('mimic_hf.csv')
     return df
 
 def drop_duplicates(df):
