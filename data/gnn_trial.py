@@ -90,6 +90,7 @@ class GCNClassifier(nn.Module):
 
         # GNN layers
         for gnn_hidden_dim in gnn_hidden_dims:
+            #input_feature_dim=gnn_hidden_dim
             self.layers.append(Sequential('x, edge_index', [(GCNConv(in_channels=input_feature_dim,
                                                                      out_channels=gnn_hidden_dim), 'x, edge_index -> x'),
                                                             nn.BatchNorm1d(gnn_hidden_dim),
@@ -109,9 +110,9 @@ class GCNClassifier(nn.Module):
 
     def forward(self, g):
 
-        h = g.features.squeeze()
-        h = torch.reshape(h, [h.shape[0]*h.shape[1], -1])
-        edge_index = g.edge_index
+        h = g.features.squeeze().cuda()
+        h = torch.reshape(h, [h.shape[0]*h.shape[1], -1]).cuda()
+        edge_index = g.edge_index.cuda()
         
         # GNN layers
         for gnn_layer in self.layers:
@@ -174,7 +175,10 @@ def train(trainloader, valloader, testloader, gnn_classifiers):
     optimizer = Adam(list(gnn_classifiers.parameters()))
     loss_func = nn.BCELoss()
     
-    epochs=50
+    # Define the scheduler
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=2, threshold=0.01, min_lr=0.000001)
+
+    epochs=300
     train_losses = []
     val_losses = []
     train_accs = []
@@ -193,6 +197,7 @@ def train(trainloader, valloader, testloader, gnn_classifiers):
             optimizer.zero_grad()
 
             # Use GNN layers to propagate messages between embeddings #TODO - define data_batch.x and data_batch.y
+            data_batch = data_batch.cuda()
             data_batch.x = data_batch.features
             x = gnn_classifiers(data_batch)
             y = data_batch.y
@@ -223,9 +228,10 @@ def train(trainloader, valloader, testloader, gnn_classifiers):
             for i, data_batch in enumerate(tqdm(valloader)):
 
                 # Use GNN layers to propagate messages between pixel embeddings
+                data_batch = data_batch.cuda()
                 data_batch.x = data_batch.features
-                x = gnn_classifiers(data_batch)
-                y = data_batch.y
+                x = gnn_classifiers(data_batch).cuda()
+                y = data_batch.y.cuda()
                 y = y.type(torch.float)
                 loss = loss_func(x, y)
                 val_loss += loss.detach().cpu().item() * batch_size
@@ -251,17 +257,21 @@ def train(trainloader, valloader, testloader, gnn_classifiers):
         train_accs.append(train_acc)
         val_accs.append(val_acc)
 
+        # Update the scheduler based on the validation loss
+        scheduler.step(val_loss)
+
         # Print epoch information
         wandb.log({"train_loss": train_loss, "val_loss": val_loss, "train_acc": train_acc, "val_acc": val_acc})
         print(f"Epoch {epoch+1}/{epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}, Train Acc: {train_acc:.4f}, Val Acc: {val_acc:.4f}")
 
+    torch.save(gnn_classifiers.state_dict(), 'weights.pth')
 
 
 if __name__ == "__main__":
     grouped_df = get_cleaned_df()
     val_size = 0.1
     test_size = 0.1
-    batch_size = 32 
+    batch_size = 256
     
     # split data into training and test sets
     train_data, test_data = train_test_split(grouped_df, test_size=test_size)
@@ -288,10 +298,10 @@ if __name__ == "__main__":
 
     gnn_classifiers = GCNClassifier(input_feature_dim=3, #TODO
                                 dropout_p=0.3,
-                                gnn_hidden_dims=[64, 16],
-                                mlp_hidden_dim=16,
+                                gnn_hidden_dims=[64, 32],
+                                mlp_hidden_dim=32,
                                 num_classes=1)
     
-    train(trainloader, valloader, testloader)
+    train(trainloader, valloader, testloader, gnn_classifiers.cuda())
     
 
