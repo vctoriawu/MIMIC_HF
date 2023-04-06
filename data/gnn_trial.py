@@ -17,7 +17,7 @@ import wandb
 from torch.utils.data import WeightedRandomSampler
 from torch.optim import Adam
 import torch.nn as nn
-from torch_geometric.nn import MessagePassing, Sequential, GCNConv, global_add_pool, global_mean_pool
+from torch_geometric.nn import MessagePassing, Sequential, GCNConv, GATConv, global_add_pool, global_mean_pool
 from sklearn.metrics import accuracy_score
 import numpy as np
 import time
@@ -113,6 +113,55 @@ class GCNClassifier(nn.Module):
         h = g.features.squeeze().cuda()
         h = torch.reshape(h, [h.shape[0]*h.shape[1], -1]).cuda()
         edge_index = g.edge_index.cuda()
+        
+        # GNN layers
+        for gnn_layer in self.layers:
+            h = gnn_layer(h, edge_index)
+
+        # Pool node embeddings to create the graph embedding
+        h = global_mean_pool(h, g.batch)
+
+        # Output MLP
+        h = self.output_mlp(h)
+        h = h.squeeze()
+
+        return h
+
+class GATClassifier(nn.Module):
+    def __init__(self,
+                 input_feature_dim,
+                 dropout_p,
+                 gnn_hidden_dims,
+                 mlp_hidden_dim,
+                 num_classes):
+        super().__init__()
+
+        self.layers = nn.ModuleList()
+
+        # GNN layers
+        for gnn_hidden_dim in gnn_hidden_dims:
+            self.layers.append(Sequential('x, edge_index', [(GATConv(in_channels=input_feature_dim,
+                                                                     out_channels=gnn_hidden_dim), 'x, edge_index -> x'),
+                                                            nn.BatchNorm1d(gnn_hidden_dim),
+                                                            nn.Dropout(p=dropout_p),
+                                                            nn.ReLU(inplace=True)]))
+            input_feature_dim = gnn_hidden_dim
+
+        # Output MLP layers
+        self.output_mlp = nn.Sequential(nn.Linear(in_features=gnn_hidden_dims[-1],
+                                                  out_features=mlp_hidden_dim),
+                                        nn.BatchNorm1d(mlp_hidden_dim),
+                                        nn.Dropout(p=dropout_p),
+                                        nn.ReLU(inplace=True),
+                                        nn.Linear(in_features=mlp_hidden_dim,
+                                                  out_features=num_classes),
+                                        nn.Sigmoid())
+
+    def forward(self, g):
+
+        h = g.features.squeeze()
+        h = torch.reshape(h, [h.shape[0]*h.shape[1], -1])
+        edge_index = g.edge_index
         
         # GNN layers
         for gnn_layer in self.layers:
@@ -297,6 +346,12 @@ if __name__ == "__main__":
     testloader = DataLoader(test_dataset, batch_size=batch_size, drop_last=True, sampler=test_sampler)
 
     gnn_classifiers = GCNClassifier(input_feature_dim=3, #TODO
+                                dropout_p=0.3,
+                                gnn_hidden_dims=[64, 32],
+                                mlp_hidden_dim=32,
+                                num_classes=1)
+
+    gat_classifier = GATClassifier(input_feature_dim=3, 
                                 dropout_p=0.3,
                                 gnn_hidden_dims=[64, 32],
                                 mlp_hidden_dim=32,
